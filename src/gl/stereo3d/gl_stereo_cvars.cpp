@@ -57,6 +57,8 @@ CVAR(Float, vr_vunits_per_meter, 27.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // MET
 
 CVAR(Float, vr_floor_offset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // METERS
 
+CVAR(Bool, vr_freelook, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // Enable freelook in VR
+
 // Manage changing of 3D modes:
 namespace s3d {
 

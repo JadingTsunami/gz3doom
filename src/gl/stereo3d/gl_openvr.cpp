@@ -103,8 +103,9 @@ EXTERN_CVAR(Int, screenblocks);
 EXTERN_CVAR(Float, movebob);
 EXTERN_CVAR(Bool, gl_billboard_faces_camera);
 EXTERN_CVAR(Int, gl_multisample);
-EXTERN_CVAR(Float, vr_vunits_per_meter)
-EXTERN_CVAR(Float, vr_floor_offset)
+EXTERN_CVAR(Float, vr_vunits_per_meter);
+EXTERN_CVAR(Float, vr_floor_offset);
+EXTERN_CVAR(Bool, vr_freelook);
 
 bool IsOpenVRPresent()
 {
@@ -710,6 +711,7 @@ void OpenVRMode::updateHmdPose(
 	double hmdroll = hmdRollRadians;
 
 	double hmdYawDelta = 0;
+	double hmdPitchDelta = 0;
 	if (doTrackHmdYaw) {
 		// Set HMD angle game state parameters for NEXT frame
 		static double previousHmdYaw = 0;
@@ -726,14 +728,28 @@ void OpenVRMode::updateHmdPose(
 	/* */
 	// Pitch
 	if (doTrackHmdPitch) {
+		static double previousHmdPitch = 0;
+		static bool havePreviousPitch = false;
 		double pixelstretch = level.info ? level.info->pixelstretch : 1.2;
 		double hmdPitchInDoom = -atan(tan(hmdpitch) / pixelstretch);
 		double viewPitchInDoom = GLRenderer->mAngles.Pitch.Radians();
-		double dPitch = 
-			// hmdPitchInDoom
-			-hmdpitch
-			- viewPitchInDoom;
-		G_AddViewPitch(mAngleFromRadians(-dPitch));
+		
+
+		if (vr_freelook == true) {
+			double dPitch = hmdpitch;
+			if (!havePreviousPitch) {
+				previousHmdPitch = dPitch;
+				havePreviousPitch = true;
+			}
+			hmdPitchDelta = dPitch - previousHmdPitch;
+			G_AddViewPitch(mAngleFromRadians(hmdPitchDelta));
+			previousHmdPitch = hmdpitch;
+		}
+		else {
+			double dPitch =	- hmdpitch - viewPitchInDoom;
+			G_AddViewPitch(mAngleFromRadians(-dPitch));
+		}
+		
 	}
 
 	// Roll can be local, because it doesn't affect gameplay.
@@ -742,8 +758,60 @@ void OpenVRMode::updateHmdPose(
 
 	// Late-schedule update to renderer angles directly, too
 	if (doLateScheduledRotationTracking) {
-		if (doTrackHmdPitch)
-			GLRenderer->mAngles.Pitch = RAD2DEG(-hmdpitch);
+		if (doTrackHmdPitch) {
+			if ((gamestate == GS_LEVEL)
+				&& (menuactive == MENU_Off)
+				&& (!paused)
+				&& vr_freelook )
+			{
+				double gamePitchDegrees = r_viewpoint.Angles.Pitch.Degrees;
+				double pixelstretch = level.info ? level.info->pixelstretch : 1.2;
+				double hmdPitchInDoom = -atan(tan(hmdpitch) / pixelstretch);
+				double viewPitchInDoom = GLRenderer->mAngles.Pitch.Radians();
+				double dPitch =	-hmdpitch - viewPitchInDoom;
+				double hmdPitchDegrees = RAD2DEG(dPitch);
+				
+				double currentPitchOffset = gamePitchDegrees - hmdPitchDegrees;
+				static double pitchOffset = 0;
+
+				// Predict current game view direction using hmd Pitch change from previous time step
+				static double previousGamePitchDegrees = 0;
+				static double previousHmdPitchDelta = 0;
+				double predictedGamePitchDegrees = previousGamePitchDegrees + RAD2DEG(previousHmdPitchDelta);
+				double predictionError = predictedGamePitchDegrees - gamePitchDegrees;
+				while (predictionError > 180.0) predictionError -= 360.0;
+				while (predictionError < -180.0) predictionError += 360.0;
+				predictionError = std::abs(predictionError);
+				if (predictionError > 0.1) {
+					// looks like someone is turning using the controller, not just the HMD, so reset offset now
+					pitchOffset = currentPitchOffset;
+				}
+
+				// 
+				double discrepancy = pitchOffset - currentPitchOffset;
+				while (discrepancy > 180.0) discrepancy -= 360.0;
+				while (discrepancy < -180.0) discrepancy += 360.0;
+				discrepancy = std::abs(discrepancy);
+				if (discrepancy > 5.0)
+				{
+					pitchOffset = currentPitchOffset;
+				}
+
+				previousGamePitchDegrees = gamePitchDegrees;
+				previousHmdPitchDelta = hmdPitchDelta;
+			
+				double viewPitch = gamePitchDegrees - hmdPitchDegrees;
+				while (viewPitch <= -180.0)
+					viewPitch += 360.0;
+				while (viewPitch > 180.0)
+					viewPitch -= 360.0;
+				r_viewpoint.Angles.Pitch = viewPitch;
+
+			}
+			else {
+				GLRenderer->mAngles.Pitch = RAD2DEG(-hmdpitch);
+			}
+		}
 		if (doTrackHmdYaw) {
 			static double yawOffset = 0;
 
